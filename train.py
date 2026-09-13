@@ -113,7 +113,7 @@ def training_loop_(
 
     dataloader_pbar = tqdm(dataloader_pbar, total=len(unsup_dataloader), desc="Training")
 
-    model_save_dir = os.path.join(save_dir, 'model.pt')
+    model_save_dir = os.path.join(save_dir, 'last_model.pt')
 
     translator.train()
     for i, batches in enumerate(dataloader_pbar):
