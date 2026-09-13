@@ -17,7 +17,7 @@ from translators.Discriminator import Discriminator
 # from eval import eval_model
 from utils.collate import MultiencoderTokenizedDataset, TokenizedCollator
 from utils.eval_utils import EarlyStopper, eval_loop_
-from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN, MMDGAN, CauchySchwarzGAN
+from utils.gan import LeastSquaresGAN, RelativisticGAN, VanillaGAN
 from utils.model_utils import get_sentence_embedding_dimension, load_encoder
 from utils.muon import MuonW
 from utils.utils import *
@@ -28,7 +28,18 @@ from utils.wandb_logger import Logger
 from datasets import load_from_disk
 
 from fmri.data import FmriSplitConfig, load_fmri_train_and_eval_datasets
+#csd_
+def rbf_kernel(x, y, sigma=1.0):
+    x_norm = (x ** 2).sum(1).view(-1, 1)
+    y_norm = (y ** 2).sum(1).view(1, -1)
+    dist = x_norm + y_norm - 2.0 * torch.mm(x, y.t())
+    return torch.exp(-dist / (2 * sigma ** 2))
 
+def compute_csd(x, y, sigma=1.0):
+    k_xx = rbf_kernel(x, x, sigma).mean()
+    k_yy = rbf_kernel(y, y, sigma).mean()
+    k_xy = rbf_kernel(x, y, sigma).mean()
+    return k_xx + k_yy - 2 * k_xy
 
 def _split_muon_params(model: torch.nn.Module):
     matrix_params = []
@@ -407,7 +418,12 @@ def main():
     print("Number of *trainable* parameters:", sum(p.numel() for p in translator.parameters() if p.requires_grad))
     print(translator)
 
-    
+    logger = Logger(
+        project=cfg.wandb_project,
+        name=cfg.wandb_name,
+        dummy=(cfg.wandb_project is None) or not (cfg.use_wandb),
+        config=cfg,
+    )
 
     num_workers = min(get_num_proc(), 8)
     if fmri_mode:
@@ -508,52 +524,6 @@ def main():
     gen_optimizers = build_generator_optimizers(cfg, translator)
     
     ######################################################################################
-    disc = Discriminator(
-        latent_dim=translator.in_adapters[cfg.unsup_emb].in_dim,
-        discriminator_dim=cfg.disc_dim,
-        depth=cfg.disc_depth,
-        weight_init=cfg.weight_init
-    )
-    disc_opt = torch.optim.Adam(disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
-
-    cfg.num_disc_params = sum(x.numel() for x in disc.parameters())
-    print(f"Number of discriminator parameters:", cfg.num_disc_params)
-    ######################################################################################
-    sup_disc = Discriminator(
-        latent_dim=translator.in_adapters[cfg.sup_emb].in_dim,
-        discriminator_dim=cfg.disc_dim, 
-        depth=cfg.disc_depth, 
-    )
-    sup_disc_opt = torch.optim.Adam(sup_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
-
-    cfg.num_sup_disc_params = sum(x.numel() for x in sup_disc.parameters())
-    print(f"Number of supervised discriminator parameters:", cfg.num_sup_disc_params)
-    print(sup_disc)
-    ######################################################################################
-    latent_disc = Discriminator(
-        latent_dim=cfg.d_adapter,
-        discriminator_dim=cfg.disc_dim,
-        depth=cfg.disc_depth,
-        weight_init=cfg.weight_init
-    )
-    latent_disc_opt = torch.optim.RMSprop(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
-    cfg.num_latent_disc_params = sum(x.numel() for x in latent_disc.parameters())
-    print(f"Number of latent discriminator parameters:", cfg.num_latent_disc_params)
-    print(latent_disc)
-    latent_disc_opt = torch.optim.Adam(latent_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
-    ######################################################################################
-    similarity_disc = Discriminator(
-        latent_dim=cfg.bs,
-        discriminator_dim=cfg.disc_dim,
-        depth=cfg.disc_depth,
-        weight_init=cfg.weight_init
-    )
-    similarity_disc_opt = torch.optim.RMSprop(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps)
-    cfg.num_similarity_disc_params = sum(x.numel() for x in similarity_disc.parameters())
-    print(f"Number of similarity discriminator parameters:", cfg.num_similarity_disc_params)
-    print(similarity_disc)
-    similarity_disc_opt = torch.optim.Adam(similarity_disc.parameters(), lr=cfg.disc_lr, eps=cfg.eps, betas=(0.5, 0.999))
-    ######################################################################################
 
     max_num_epochs = int(np.ceil(cfg.epochs))
     steps_per_epoch = (len(supset) + cfg.bs - 1) // cfg.bs if fmri_mode else len(supset) // cfg.bs
@@ -600,10 +570,6 @@ def main():
         gan_cls = LeastSquaresGAN
     elif cfg.gan_style == "relativistic":
         gan_cls = RelativisticGAN
-    elif cfg.gan_style == "mmd":
-        gan_cls = MMDGAN
-    elif cfg.gan_style == "csd":
-        gan_cls = CauchySchwarzGAN
     else:
         raise ValueError(f"Unknown GAN style: {cfg.gan_style}")
     latent_gan = gan_cls(
@@ -653,7 +619,6 @@ def main():
     for epoch in range(max_num_epochs):
         should_eval = use_val_set and (epoch % eval_every == 0)
         if should_eval:
-            print(f"[Epoch {epoch}] Validation START", flush=True)
             with torch.no_grad(), accelerator.autocast():
                 translator.eval()
                 val_res = {}
@@ -679,34 +644,17 @@ def main():
                             val_res[f"val/{k} (avg. {cfg.top_k_batches} batches)"] = v
                 wandb.log(val_res)
                 translator.train()
-                print(f"[Epoch {epoch}] Validation DONE", flush=True)
 
-                if epoch >= cfg.min_epochs and early_stopping:
-                    rank_vals = [v for k, v in val_res.items() if k.split(' ')[0].endswith('_rank')]
-                    if not rank_vals:
-                        raise ValueError(f"No rank metric found in val_res keys: {list(val_res.keys())}")
-                    score = float(np.mean(rank_vals))
+            if epoch >= cfg.min_epochs and early_stopping:
+                score = np.mean([v for k, v in val_res.items() if 'top_rank' in k])
 
-                    prev_best = early_stopper.opt_val
-                    improved = score < (prev_best - early_stopper.min_delta)
-                    should_stop = early_stopper.early_stop(score)
+                if early_stopper.early_stop(score):
+                    print("Early stopping...")
+                    break
+                if early_stopper.counter == 0 and score < early_stopper.opt_val:
+                    print(f"Saving model (counter = {early_stopper.counter})... {score} < {early_stopper.opt_val} is the best score so far...")
+                    save_everything(cfg, translator, gen_optimizers[0], [gan, sup_gan, latent_gan, similarity_gan], save_dir)
 
-                if improved:
-                    print(
-                        f"Saving model... score={score}, "
-                        f"previous_best={prev_best}"
-                    )
-                    save_everything(
-                        cfg,
-                        translator,
-                        gen_optimizers[0],
-                        [gan, sup_gan, latent_gan, similarity_gan],
-                        save_dir
-                    )
-
-                    if should_stop:
-                        print("Early stopping...")
-                        break         
         max_num_batches = None
         print(f"Epoch", epoch, "max_num_batches", max_num_batches, "max_num_epochs", max_num_epochs)
         if epoch + 1 >= max_num_epochs:

@@ -128,7 +128,8 @@ def main():
             seed=cfg.sampling_seed,
         )
         encoders_for_eval = {**sup_encs, **unsup_enc}
-    eval_batch_size = min(cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs, len(evalset))
+    #eval_batch_size = min(cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs, len(evalset))
+    eval_batch_size = 8192
     evalloader = DataLoader(
         evalset,
         batch_size=eval_batch_size,

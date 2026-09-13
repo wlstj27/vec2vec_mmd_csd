@@ -25,3 +25,17 @@ viz/
 latex/
 runs_fmri_avg/
 runs_fmri_trial/
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+__pycache__/
+**/__pycache__/
+*.pyc
+
+wandb/
+.cache/
+
+*.pt
+*.pth
+*.ckpt
+
+.env

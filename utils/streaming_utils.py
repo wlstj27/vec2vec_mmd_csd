@@ -79,6 +79,11 @@ def load_streaming_embeddings(
         dset = load_dataset("BeIR/msmarco", "queries", streaming=streaming, num_proc=8)["queries"]
     elif dataset_name == "retrieval":
         dset = _load_retrieval_dataset()
+    elif dataset_name == "tweettopic":
+        # TweetTopic 공식 테스트셋 (800건) 로드
+        dset = load_dataset("cardiffnlp/tweet_topic_single", split="test_2021", trust_remote_code=True)
+        if "text" not in dset.column_names:
+            dset = dset.rename_column("text", "text")
     else:
         raise NotImplementedError()
 
