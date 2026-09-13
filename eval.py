@@ -3,7 +3,8 @@ import random
 import toml
 from sys import argv
 from types import SimpleNamespace
-
+import json
+from torch.utils.data import DataLoader
 import accelerate
 
 import numpy as np
@@ -120,8 +121,8 @@ def main():
             supset = dset.select(range(min(cfg.unsup_points, len(dset)), len(dset) - len(unsupset)))
 
         evalset = MultiencoderTokenizedDataset(
-            dataset=supset if hasattr(cfg, 'flip') and cfg.flip else unsupset,
-            encoders={ **unsup_enc, **sup_encs },
+            dataset=valset,
+            encoders={**unsup_enc, **sup_encs},
             n_embs_per_batch=2,
             batch_size=cfg.val_bs,
             max_length=cfg.max_seq_length,
@@ -208,6 +209,7 @@ def main():
         fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.sup_emb}_{cfg.unsup_emb}_ood.json'
     else:
         fnm = f'results/{cfg.dataset.replace("/", "_")}_{cfg.unsup_emb}_{cfg.sup_emb}.json'
+    os.makedirs("results", exist_ok=True)
     with open(fnm, 'w') as f:
         # human readable
         f.write(json.dumps(val_res, indent=4))
