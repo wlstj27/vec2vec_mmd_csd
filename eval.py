@@ -129,7 +129,10 @@ def main():
         )
         encoders_for_eval = {**sup_encs, **unsup_enc}
     #eval_batch_size = min(cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs, len(evalset))
-    eval_batch_size = 8192
+    eval_batch_size = min(
+        cfg.val_bs if hasattr(cfg, 'val_bs') else cfg.bs,
+        len(evalset)
+    )
     evalloader = DataLoader(
         evalset,
         batch_size=eval_batch_size,
@@ -144,7 +147,7 @@ def main():
 
     if cfg.style != 'identity':
         print(f"Loading models from {argv[1]}...")
-        translator.load_state_dict(torch.load(f'{argv[1]}/model.pt', map_location='cpu'), strict=False)
+        translator.load_state_dict(torch.load(f'{argv[1]}/best_model.pt', map_location='cpu'), strict=False)
 
     translator = accelerator.prepare(translator)
     # inverters = get_inverters(["gtr"], accelerator.device)
