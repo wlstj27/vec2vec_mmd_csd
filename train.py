@@ -691,18 +691,18 @@ def main():
                     improved = score < (prev_best - early_stopper.min_delta)
                     should_stop = early_stopper.early_stop(score)
 
-                if improved:
-                    print(
+                    if improved:
+                      print(
                         f"Saving model... score={score}, "
                         f"previous_best={prev_best}"
-                    )
-                    save_everything(
+                        )
+                      save_everything(
                         cfg,
                         translator,
                         gen_optimizers[0],
                         [gan, sup_gan, latent_gan, similarity_gan],
                         save_dir
-                    )
+                      )
 
                     if should_stop:
                         print("Early stopping...")
