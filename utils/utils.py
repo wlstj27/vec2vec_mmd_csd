@@ -147,7 +147,7 @@ def exit_on_nan(loss: torch.Tensor) -> None:
 
 
 def save_everything(cfg, translator, opt, gans, save_dir):
-    torch.save(translator.state_dict(), os.path.join(save_dir, 'model.pt'))
+    torch.save(translator.state_dict(), os.path.join(save_dir, 'best_model.pt'))
     torch.save(opt.state_dict(), os.path.join(save_dir, 'opt.pt'))
     for i, gan in enumerate(gans):
         torch.save(gan.discriminator.state_dict(), os.path.join(save_dir, f'gan_{i}.pt'))
