@@ -40,8 +40,17 @@ for method, gan_style in methods.items():
         cfg["train"]["patience"] = 30
         cfg["train"]["min_delta"] = 0.0
 
-        # Table 7 uses 8,192 held-out NQ records
+        # Table 7 uses 8,192 held-out NQ records, and the paper's rank
+        # metric is over the FULL 8,192-record pool (rank range 1..8192,
+        # random ~4096) -- not a smaller pool repeated and averaged.
+        # val_bs stays small (safe encoder/translator forward batch);
+        # top_k_batches * val_bs must equal top_k_size so eval_loop_'s
+        # pooling (see utils/eval_utils.py, patch_eval_pooling.py)
+        # assembles the full 8192-example pool before scoring it once.
         cfg["eval"]["val_size"] = 8192
+        cfg["eval"]["val_bs"] = 1024
+        cfg["eval"]["top_k_batches"] = 8       # 8 x 1024 = 8192
+        cfg["eval"]["top_k_size"] = 8192        # matches paper: rank 1..8192
 
         # Remove method-specific kernel settings first
         cfg["gan"].pop("mmd_sigma_scales", None)

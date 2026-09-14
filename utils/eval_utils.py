@@ -342,6 +342,10 @@ def eval_loop_(
     text_recon_res = {}
     text_translation_res = {}
     classification_res = {}
+    # Accumulates embeddings across batches so the retrieval candidate
+    # pool (top_k_size) can be larger than a single forward-pass batch
+    # (val_bs) without needing one giant encoder/translator batch.
+    rank_pool_ins = {}
 
     top_k_batches = cfg.top_k_batches if hasattr(cfg, 'top_k_batches') else 0
     text_batches = cfg.text_batches if hasattr(cfg, 'text_batches') else 0
@@ -377,10 +381,11 @@ def eval_loop_(
             merge_dicts(recon_res, r_res)
             merge_dicts(translation_res, t_res)
             if i < top_k_batches and hasattr(cfg, 'top_k_size') and hasattr(cfg, 'k') and cfg.top_k_size > 0:
-                heatmap_size = cfg.heatmap_size if i == top_k_batches - 1 else None
-                batch_res = create_heatmap(translator, ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
-                batch_res.update(create_heatmap(translator, ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
-                merge_dicts(heatmap_res, batch_res)
+                # Accumulate this batch's embeddings into the rank pool
+                # instead of computing rank on this batch alone; the
+                # pooled candidate set is scored once after the loop.
+                for k_, v_ in ins.items():
+                    rank_pool_ins.setdefault(k_, []).append(v_)
             if (
                 encoders is not None
                 and i < text_batches
@@ -395,6 +400,18 @@ def eval_loop_(
                 merge_dicts(classification_res, c_res)
             if pbar is not None:
                 pbar.update(1)
+
+        if rank_pool_ins:
+            # One retrieval pool of up to top_k_size examples, pooled
+            # across the first `top_k_batches` DataLoader batches --
+            # e.g. val_bs=1024, top_k_batches=8 -> an 8192-way pool,
+            # matching the paper's evaluation protocol, while each
+            # encoder/translator forward pass stays at val_bs (1024).
+            pooled_ins = {k_: torch.cat(v_, dim=0) for k_, v_ in rank_pool_ins.items()}
+            heatmap_size = cfg.heatmap_size if hasattr(cfg, 'heatmap_size') else None
+            batch_res = create_heatmap(translator, pooled_ins, cfg.sup_emb, cfg.unsup_emb, cfg.top_k_size, heatmap_size, cfg.k)
+            batch_res.update(create_heatmap(translator, pooled_ins, cfg.unsup_emb, cfg.sup_emb, cfg.top_k_size, heatmap_size, cfg.k))
+            merge_dicts(heatmap_res, batch_res)
 
         recon_res = mean_dicts(recon_res, ses=True, bs=cfg.val_bs)
         translation_res = mean_dicts(translation_res, ses=True, bs=cfg.val_bs)

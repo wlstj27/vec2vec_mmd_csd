@@ -65,8 +65,8 @@ csd_sigma_scales = [ 1.0,]
 [eval]
 val_size = 8192
 val_bs = 1024
-top_k_size = 1024
-top_k_batches = 4
+top_k_size = 8192
+top_k_batches = 8
 k = 16
 heatmap_size = 64
 
